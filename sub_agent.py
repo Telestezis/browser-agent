@@ -16,11 +16,20 @@ class SubAgent:
     def __init__(self, provider: str, client: Any):
         self.provider = provider
         self.client = client
-
+    
     def _get_llm_response(self, prompt: str, json_mode: bool = True) -> str:
         """Универсальный метод для получения ответа от LLM"""
         try:
-            if self.provider == "openai":
+            if self.provider == "claude":
+                from anthropic import Anthropic
+                response = self.client.messages.create(
+                    model=Config.CLAUDE_MODEL,
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                return response.content[0].text
+            
+            elif self.provider == "openai":
                 response = self.client.chat.completions.create(
                     model=Config.OPENAI_MODEL,
                     messages=[{"role": "user", "content": prompt}],
@@ -38,9 +47,17 @@ class SubAgent:
         except Exception as e:
             logger.error(f"Ошибка связи с LLM в суб-агенте: {e}")
             raise
-
+    
     def analyze_spam(self, items: List[str]) -> Dict[str, Any]:
-        """Анализирует список элементов (писем) на спам"""
+        """
+        Анализирует список элементов (писем) на спам
+        
+        Args:
+            items: Список текстов для анализа
+            
+        Returns:
+            Результат анализа с классификацией
+        """
         prompt = f"""Ты — эксперт по анализу спама. Твоя задача — проанализировать предоставленные тексты и определить, являются ли они спамом.
 
 КРИТЕРИИ СПАМА:
@@ -58,8 +75,8 @@ class SubAgent:
         {{
             "index": 0,
             "is_spam": true/false,
-            "confidence": 0.0,
-            "reason": "краткое объяснение"
+            "confidence": 0.0-1.0,
+            "reason": "краткое объяснение (1-2 предложения)"
         }}
     ],
     "summary": {{
@@ -72,32 +89,52 @@ class SubAgent:
 Тексты для анализа:
 """
         for idx, item in enumerate(items):
-            prompt += f"\nТЕКСТ {idx}:\n{item[:300]}\n"
+            prompt += f"\nТЕКСТ {idx}:\n{item}\n"
         
         try:
             result_text = self._get_llm_response(prompt, json_mode=True)
             
+            # Извлекаем JSON из ответа
             import json
             import re
+            
+            # Claude иногда оборачивает JSON в ```json ... ```
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
+                
+                # Вычисляем итоговые значения
                 spam_count = sum(1 for item in parsed.get("analysis", []) if item.get("is_spam"))
                 parsed["summary"] = {
                     "total": len(items),
                     "spam_count": spam_count,
                     "not_spam_count": len(items) - spam_count
                 }
+                
                 return parsed
             
-            return {"error": "Не удалось распарсить ответ", "raw_response": result_text}
+            return {
+                "error": "Не удалось распарсить ответ",
+                "raw_response": result_text
+            }
             
         except Exception as e:
             logger.error(f"Ошибка анализа спама: {e}")
-            return {"error": str(e)}
-
+            return {
+                "error": str(e)
+            }
+    
     def analyze_job_relevance(self, job_descriptions: List[str], user_profile: str) -> Dict[str, Any]:
-        """Анализирует релевантность вакансий профилю пользователя"""
+        """
+        Анализирует релевантность вакансий профилю пользователя
+        
+        Args:
+            job_descriptions: Список описаний вакансий
+            user_profile: Профиль пользователя (навыки, опыт)
+            
+        Returns:
+            Результат анализа с рейтингом релевантности
+        """
         prompt = f"""Ты — эксперт по подбору персонала. Твоя задача — проанализировать вакансии и определить их релевантность профилю кандидата.
 
 ПРОФИЛЬ КАНДИДАТА:
@@ -114,10 +151,10 @@ class SubAgent:
     "analysis": [
         {{
             "index": 0,
-            "relevance_score": 0.0,
-            "key_matches": ["совпадение 1"],
-            "missing_skills": ["навык"],
-            "recommendation": "высокая"
+            "relevance_score": 0.0-1.0,
+            "key_matches": ["список совпадений"],
+            "missing_skills": ["чего не хватает"],
+            "recommendation": "высокая/средняя/низкая"
         }}
     ],
     "summary": {{
@@ -131,29 +168,88 @@ class SubAgent:
 ВАКАНСИИ ДЛЯ АНАЛИЗА:
 """
         for idx, desc in enumerate(job_descriptions):
-            prompt += f"\nВАКАНСИЯ {idx}:\n{desc[:500]}\n"
+            prompt += f"\nВАКАНСИЯ {idx}:\n{desc}\n"
         
         try:
             result_text = self._get_llm_response(prompt, json_mode=True)
             
             import json
             import re
+            
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
-                high = sum(1 for item in parsed.get("analysis", []) if item.get("relevance_score", 0) >= 0.7)
-                medium = sum(1 for item in parsed.get("analysis", []) if 0.4 <= item.get("relevance_score", 0) < 0.7)
-                low = sum(1 for item in parsed.get("analysis", []) if item.get("relevance_score", 0) < 0.4)
+                
+                # Вычисляем итоговые значения
+                high = sum(1 for item in parsed.get("analysis", []) 
+                          if item.get("relevance_score", 0) >= 0.7)
+                medium = sum(1 for item in parsed.get("analysis", []) 
+                            if 0.4 <= item.get("relevance_score", 0) < 0.7)
+                low = sum(1 for item in parsed.get("analysis", []) 
+                         if item.get("relevance_score", 0) < 0.4)
+                
                 parsed["summary"] = {
                     "total": len(job_descriptions),
                     "high_relevance": high,
                     "medium_relevance": medium,
                     "low_relevance": low
                 }
+                
                 return parsed
             
-            return {"error": "Не удалось распарсить ответ", "raw_response": result_text}
+            return {
+                "error": "Не удалось распарсить ответ",
+                "raw_response": result_text
+            }
             
         except Exception as e:
             logger.error(f"Ошибка анализа вакансий: {e}")
-            return {"error": str(e)}
+            return {
+                "error": str(e)
+            }
+    
+    def extract_profile_data(self, page_text: str) -> Dict[str, Any]:
+        """
+        Извлекает ключевую информацию из профиля пользователя (например, на hh.ru)
+        """
+        prompt = f"""Ты — эксперт по анализу профилей. Извлеки ключевую информацию из текста профиля.
+
+ИНСТРУКЦИЯ:
+1. Определи основные навыки (технологии, языки программирования, инструменты)
+2. Определи опыт работы (годы, должности, компании)
+3. Определи образование
+4. Определи ключевые достижения
+
+ФОРМАТ ОТВЕТА (ТОЛЬКО ВАЛИДНЫЙ JSON):
+{{
+    "skills": ["навык 1", "навык 2"],
+    "experience_years": 0,
+    "experience_summary": "краткое резюме опыта",
+    "education": "образование",
+    "key_achievements": ["достижение 1", "достижение 2"],
+    "raw_profile": "сокращённый текст профиля (200 символов)"
+}}
+
+ТЕКСТ ПРОФИЛЯ:
+{page_text[:3000]}
+"""
+        try:
+            result_text = self._get_llm_response(prompt, json_mode=True)
+            
+            import json
+            import re
+            
+            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            
+            return {
+                "error": "Не удалось распарсить ответ",
+                "raw_response": result_text
+            }
+            
+        except Exception as e:
+            logger.error(f"Ошибка извлечения профиля: {e}")
+            return {
+                "error": str(e)
+            }

@@ -138,3 +138,10 @@ def confirm_action(action: str, details: str) -> bool:
         if confirm in ["да", "нет", "y", "n"]:
             return confirm in ["да", "y"]
         print("Пожалуйста, введите 'да' или 'нет'")
+    # utils.py
+def prioritize_elements(elements: List[Dict], task: str) -> List[Dict]:
+    """Приоритизирует элементы на основе задачи (оставляет только релевантные)"""
+    # Пример: для задачи "удалить спам" оставляем только чекбоксы и кнопки удаления
+    if "спам" in task.lower() or "удалить" in task.lower():
+        return [e for e in elements if "checkbox" in str(e) or "delete" in str(e).lower()]
+    return elements[:Config.PAGE_ELEMENTS_LIMIT]  # fallback
