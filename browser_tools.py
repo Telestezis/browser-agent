@@ -27,10 +27,21 @@ class BrowserTools:
             logger.info(f"🌐 Переход на {url}")
             self.page.goto(url, timeout=Config.TOOL_TIMEOUT * 1000)
             time.sleep(1.5)
+            
+            # Проверка на редирект/капчу после навигации
+            current_url = self.page.url
+            is_captcha_detected = False
+            captcha_keywords = ['captcha', 'security check', 'проверка безопасности', 'dzen.ru', 'yredirect']
+            for keyword in captcha_keywords:
+                if keyword.lower() in current_url.lower():
+                    is_captcha_detected = True
+                    break
+            
             return {
                 "success": True,
-                "url": self.page.url,
-                "message": f"Перешли на {url}"
+                "url": current_url,
+                "is_captcha_detected": is_captcha_detected,
+                "message": f"Перешли на {url}" + (" ⚠️ ОБНАРУЖЕНА КАПЧА/РЕДИРЕКТ!" if is_captcha_detected else "")
             }
         except Exception as e:
             error_msg = f"Ошибка навигации: {str(e)}"
@@ -44,6 +55,15 @@ class BrowserTools:
         """Извлекает информацию о текущей странице и видимых элементах"""
         try:
             logger.info("📸 Извлечение снимка страницы")
+            
+            # Проверка на капчу/редирект
+            current_url = self.page.url
+            is_captcha_detected = False
+            captcha_keywords = ['captcha', 'security check', 'проверка безопасности', 'dzen.ru', 'yredirect']
+            for keyword in captcha_keywords:
+                if keyword.lower() in current_url.lower():
+                    is_captcha_detected = True
+                    break
             
             result = self.page.evaluate("""() => {
                 const elements = [];
@@ -93,13 +113,19 @@ class BrowserTools:
             element_count = len(result.get("elements", []))
             logger.info(f"✅ Извлечено {element_count} элементов")
             
+            # Проверка на капчу по содержимому страницы
+            page_title = result.get("title", "").lower()
+            if 'captcha' in page_title or 'security' in page_title or 'проверка' in page_title:
+                is_captcha_detected = True
+            
             return {
                 "success": True,
                 "title": result.get("title", ""),
                 "url": result.get("url", ""),
                 "elements": result.get("elements", []),
                 "element_count": element_count,
-                "message": f"Извлечено {element_count} элементов со страницы"
+                "is_captcha_detected": is_captcha_detected,
+                "message": f"Извлечено {element_count} элементов со страницы" + (" ⚠️ ОБНАРУЖЕНА КАПЧА/РЕДИРЕКТ!" if is_captcha_detected else "")
             }
             
         except Exception as e:

@@ -70,14 +70,26 @@ class BrowserAgent:
         except:
             pass
     
-    def _build_system_prompt(self) -> str:
-        return """Ты — автономный браузерный агент. ТВОЯ ЗАДАЧА: находить информацию через поиск в Яндексе.
-
-## 🔑 ГЛАВНОЕ ПРАВИЛО ДЛЯ ИНФОРМАЦИОННЫХ ЗАПРОСОВ:
-Если пользователь просит найти информацию («найди», «поищи», «расскажи про»):
-→ ВСЕГДА начинай с перехода на Яндекс: https://yandex.ru
-→ Всегда используй поле поиска Яндекса для ввода запроса
-→ Никогда не пытайся угадать URL напрямую!
+    def _build_system_prompt(self, task: str = "") -> str:
+        """
+        Строит системный промпт динамически в зависимости от задачи.
+        """
+        task_lower = task.lower() if task else ""
+        
+        # Определяем тип задачи
+        is_email_task = any(keyword in task_lower for keyword in [
+            "почт", "письм", "email", "imap", "спам", "удали письмо", "прочитай письмо",
+            "найди в почте", "получи письмо", "отчёт из письма"
+        ])
+        
+        is_search_task = any(keyword in task_lower for keyword in [
+            "найди", "поищи", "расскажи про", "информация", "погода", "новости",
+            "узнай", "что такое", "как", "где найти"
+        ]) or not is_email_task  # По умолчанию считаем поисковой задачей
+        
+        base_prompt = """Ты — автономный браузерный агент с двумя режимами работы:
+1. 🔍 ПОИСК ИНФОРМАЦИИ в интернете через Яндекс
+2. 📧 РАБОТА С ЭЛЕКТРОННОЙ ПОЧТОЙ через браузер (Yandex Mail)
 
 ## 🔴 КРИТИЧЕСКИ ВАЖНО — ФОРМАТ ОТВЕТА:
 1. ТВОЙ ОТВЕТ ДОЛЖЕН СОДЕРЖАТЬ ТОЛЬКО ОДИН ЧИСТЫЙ JSON БЕЗ ЛЮБОГО ДРУГОГО ТЕКСТА
@@ -89,15 +101,51 @@ class BrowserAgent:
 
 ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
 {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
+"""
+        
+        # Добавляем инструкции для почтовых задач
+        if is_email_task:
+            email_section = """
+## 📧 ТЫ РАБОТАЕШЬ С ЭЛЕКТРОННОЙ ПОЧТОЙ (YANDEX MAIL через браузер)
 
-## СТРАТЕГИЯ РАБОТЫ:
+### СТРАТЕГИЯ ДЛЯ ПОЧТОВЫХ ЗАДАЧ:
+1. ШАГ 1: Перейди на почту → {"tool": "navigate", "args": {"url": "https://mail.yandex.ru"}}
+2. ШАГ 2: Сделай снимок страницы → {"tool": "extract_page_snapshot", "args": {}}
+3. ШАГ 3: Найди и кликни по письмам в списке
+4. ШАГ 4: Прочитай содержимое писем
+
+### ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+Все браузерные инструменты работают с почтой через веб-интерфейс.
+"""
+            base_prompt += email_section
+        
+        # Добавляем инструкции для поисковых задач
+        if is_search_task:
+            search_section = """
+## 🔍 ТЫ ВЫПОЛНЯЕШЬ ПОИСК ИНФОРМАЦИИ В ИНТЕРНЕТЕ
+
+### ГЛАВНОЕ ПРАВИЛО ДЛЯ ИНФОРМАЦИОННЫХ ЗАПРОСОВ:
+Если пользователь просит найти информацию («найди», «поищи», «расскажи про»):
+→ ВСЕГДА начинай с перехода на Яндекс: https://yandex.ru
+→ Используй поле поиска Яндекса для ввода запроса
+→ Если Яндекс недоступен (капча/редирект), попробуй альтернативы:
+   • https://ya.ru - короткая версия Яндекса
+   • https://google.com - международный поиск
+   • https://ru.wikipedia.org - для энциклопедической информации
+
+### СТРАТЕГИЯ РАБОТЫ:
 1. ШАГ 1: {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
 2. ШАГ 2: {"tool": "extract_page_snapshot", "args": {}}
 3. ШАГ 3: Найди поле поиска (обычно индекс 0 или 1) → {"tool": "fill_field_by_index", "args": {"index": 0, "value": "запрос"}}
 4. ШАГ 4: {"tool": "press_enter", "args": {}}
 5. ШАГ 5: Проанализируй результаты поиска → кликни по подходящей ссылке
 
-## ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+### ЕСЛИ ЯНДЕКС НЕДОСТУПЕН (КАПЧА/РЕДИРЕКТ):
+1. Попробуй https://ya.ru - более лёгкая версия
+2. Попробуй https://ru.wikipedia.org/wiki/Запрос
+3. Попробуй https://google.com/search?q=запрос
+
+### ДОСТУПНЫЕ ИНСТРУМЕНТЫ ДЛЯ БРАУЗЕРА:
 {"tool": "navigate", "args": {"url": "https://example.com"}}
 {"tool": "extract_page_snapshot", "args": {}}
 {"tool": "click_element_by_index", "args": {"index": 0}}
@@ -107,12 +155,20 @@ class BrowserAgent:
 {"tool": "check_checkbox", "args": {"index": 0}}
 {"tool": "get_current_url", "args": {}}
 {"tool": "wait_for_navigation", "args": {}}
-
-## ФИНАЛЬНЫЙ ОТВЕТ:
-Когда найдена информация, напиши:
-ЗАДАЧА ВЫПОЛНЕНА
-Краткое содержание найденной информации
 """
+            base_prompt += search_section
+        
+        finish_section = """
+## ФИНАЛЬНЫЙ ОТВЕТ:
+Когда задача выполнена, напиши ТОЛЬКО:
+ЗАДАЧА ВЫПОЛНЕНА
+[краткий результат]
+
+НЕ пиши ничего после этого. НЕ продолжай размышления.
+"""
+        base_prompt += finish_section
+        
+        return base_prompt
 
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение инструмента по имени"""
@@ -194,11 +250,11 @@ class BrowserAgent:
         if max_steps is None:
             max_steps = Config.MAX_STEPS
         
-        logger.info(f"🎯 Начинаем выполнение задачи: {task}")
+        logger.info(f"🎯 Задача: {task}")
         
         # Инициализация истории диалога для GigaChat
         from gigachat.models import Messages, MessagesRole
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(task)
         self.conversation_history = [
             Messages(role=MessagesRole.SYSTEM, content=system_prompt),
             Messages(role=MessagesRole.USER, content=f"ЗАДАЧА: {task}")
@@ -226,11 +282,21 @@ class BrowserAgent:
             except Exception as e:
                 return f"❌ Ошибка связи с LLM: {str(e)}"
             
-            # Вывод рассуждений агента
+            # Вывод рассуждений агента в консоль
             print(f"\n{'─'*60}")
-            print(f"🤖 АГЕНТ ДУМАЕТ (Шаг {step + 1}):")
+            print(f"🤖 АГЕНТ (Шаг {step + 1}):")
             print(f"{'─'*60}")
-            print(assistant_reply[:500] + "..." if len(assistant_reply) > 500 else assistant_reply)
+            print(assistant_reply)
+            
+            # ПРОВЕРКА ЗАВЕРШЕНИЯ ЗАДАЧИ - должна быть ДО парсинга JSON
+            reply_lower = assistant_reply.lower().strip()
+            
+            # Если агент явно сообщает о завершении задачи
+            if any(keyword in reply_lower for keyword in ["задача выполнена", "готово", "успешно завершено", "mission complete"]):
+                # Проверяем, что это не просто упоминание, а финальное сообщение
+                if "tool" not in reply_lower or reply_lower.startswith("задача выполнена") or reply_lower.startswith("готово"):
+                    logger.info("✅ Агент сообщил о завершении задачи")
+                    return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply}"
             
             # ИЗВЛЕЧЕНИЕ ИНСТРУМЕНТА ИЗ ОТВЕТА
             tool_call = extract_json_from_text(assistant_reply)
@@ -281,6 +347,15 @@ class BrowserAgent:
                     
                     result_msg += f"\n\nТекущая страница: {tool_result.get('title', 'Без названия')}"
                     result_msg += f"\nURL: {tool_result.get('url', 'Неизвестен')}"
+                    
+                    # Проверка на капчу/редирект
+                    is_captcha = tool_result.get("is_captcha_detected", False)
+                    if is_captcha:
+                        result_msg += "\n⚠️ ОБНАРУЖЕНА КАПЧА ИЛИ РЕДИРЕКТ! Попробуй другой URL:"
+                        result_msg += "\n- https://ya.ru - короткая версия Яндекса"
+                        result_msg += "\n- https://google.com/search?q=запрос"
+                        result_msg += "\n- https://ru.wikipedia.org/wiki/Запрос"
+                    
                     result_msg += f"\n\nЭлементы на странице ({tool_result.get('element_count', 0)}):"
                     result_msg += f"\n{elements_info or 'Нет элементов'}"
                     if tool_result.get("element_count", 0) > 15:
@@ -293,11 +368,16 @@ class BrowserAgent:
                     else:
                         blank_page_count = 0
                         last_url = current_url
+                    
+                    # Если обнаружена капча, увеличиваем счётчик для восстановления
+                    if is_captcha:
+                        blank_page_count += 1
                 
                 # Детектирование неудачной навигации
                 if tool_name == "navigate":
                     current_url = tool_result.get("url", "")
-                    if current_url == "about:blank" or not tool_result.get("success"):
+                    is_captcha = tool_result.get("is_captcha_detected", False)
+                    if current_url == "about:blank" or not tool_result.get("success") or is_captcha:
                         blank_page_count += 1
                     else:
                         blank_page_count = 0
@@ -311,15 +391,6 @@ class BrowserAgent:
                 
                 logger.info(f"🔧 Результат: {result_msg.split(chr(10))[0][:100]}...")
                 
-                # ПРОВЕРКА ЗАВЕРШЕНИЯ ЗАДАЧИ
-                if step > 2 and any(keyword in assistant_reply.lower() for keyword in ["задача выполнена", "готово", "успешно завершено"]):
-                    if "tool" not in assistant_reply.lower() or len(assistant_reply) < 100:
-                        for keyword in ["итог", "результат", "ответ", "вывод", "отчёт"]:
-                            pos = assistant_reply.lower().find(keyword)
-                            if pos != -1:
-                                return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply[pos:]}"
-                        return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply}"
-            
             else:
                 # ОБРАБОТКА ОШИБКИ ФОРМАТА
                 consecutive_format_errors += 1
