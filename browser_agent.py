@@ -109,9 +109,11 @@ class BrowserAgent:
 {"tool": "wait_for_navigation", "args": {}}
 
 ## ФИНАЛЬНЫЙ ОТВЕТ:
-Когда найдена информация, напиши:
+Когда задача выполнена, напиши ТОЛЬКО:
 ЗАДАЧА ВЫПОЛНЕНА
-Краткое содержание найденной информации
+[краткий результат]
+
+НЕ пиши ничего после этого. НЕ продолжай размышления.
 """
 
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,7 +196,7 @@ class BrowserAgent:
         if max_steps is None:
             max_steps = Config.MAX_STEPS
         
-        logger.info(f"🎯 Начинаем выполнение задачи: {task}")
+        logger.info(f"🎯 Задача: {task}")
         
         # Инициализация истории диалога для GigaChat
         from gigachat.models import Messages, MessagesRole
@@ -226,11 +228,21 @@ class BrowserAgent:
             except Exception as e:
                 return f"❌ Ошибка связи с LLM: {str(e)}"
             
-            # Вывод рассуждений агента
+            # Вывод рассуждений агента в консоль
             print(f"\n{'─'*60}")
-            print(f"🤖 АГЕНТ ДУМАЕТ (Шаг {step + 1}):")
+            print(f"🤖 АГЕНТ (Шаг {step + 1}):")
             print(f"{'─'*60}")
-            print(assistant_reply[:500] + "..." if len(assistant_reply) > 500 else assistant_reply)
+            print(assistant_reply)
+            
+            # ПРОВЕРКА ЗАВЕРШЕНИЯ ЗАДАЧИ - должна быть ДО парсинга JSON
+            reply_lower = assistant_reply.lower().strip()
+            
+            # Если агент явно сообщает о завершении задачи
+            if any(keyword in reply_lower for keyword in ["задача выполнена", "готово", "успешно завершено", "mission complete"]):
+                # Проверяем, что это не просто упоминание, а финальное сообщение
+                if "tool" not in reply_lower or reply_lower.startswith("задача выполнена") or reply_lower.startswith("готово"):
+                    logger.info("✅ Агент сообщил о завершении задачи")
+                    return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply}"
             
             # ИЗВЛЕЧЕНИЕ ИНСТРУМЕНТА ИЗ ОТВЕТА
             tool_call = extract_json_from_text(assistant_reply)
@@ -311,15 +323,6 @@ class BrowserAgent:
                 
                 logger.info(f"🔧 Результат: {result_msg.split(chr(10))[0][:100]}...")
                 
-                # ПРОВЕРКА ЗАВЕРШЕНИЯ ЗАДАЧИ
-                if step > 2 and any(keyword in assistant_reply.lower() for keyword in ["задача выполнена", "готово", "успешно завершено"]):
-                    if "tool" not in assistant_reply.lower() or len(assistant_reply) < 100:
-                        for keyword in ["итог", "результат", "ответ", "вывод", "отчёт"]:
-                            pos = assistant_reply.lower().find(keyword)
-                            if pos != -1:
-                                return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply[pos:]}"
-                        return f"✅ ЗАДАЧА ВЫПОЛНЕНА:\n{assistant_reply}"
-            
             else:
                 # ОБРАБОТКА ОШИБКИ ФОРМАТА
                 consecutive_format_errors += 1
