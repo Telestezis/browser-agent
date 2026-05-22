@@ -70,14 +70,26 @@ class BrowserAgent:
         except:
             pass
     
-    def _build_system_prompt(self) -> str:
-        return """Ты — автономный браузерный агент. ТВОЯ ЗАДАЧА: находить информацию через поиск в Яндексе.
-
-## 🔑 ГЛАВНОЕ ПРАВИЛО ДЛЯ ИНФОРМАЦИОННЫХ ЗАПРОСОВ:
-Если пользователь просит найти информацию («найди», «поищи», «расскажи про»):
-→ ВСЕГДА начинай с перехода на Яндекс: https://yandex.ru
-→ Всегда используй поле поиска Яндекса для ввода запроса
-→ Никогда не пытайся угадать URL напрямую!
+    def _build_system_prompt(self, task: str = "") -> str:
+        """
+        Строит системный промпт динамически в зависимости от задачи.
+        """
+        task_lower = task.lower() if task else ""
+        
+        # Определяем тип задачи
+        is_email_task = any(keyword in task_lower for keyword in [
+            "почт", "письм", "email", "imap", "спам", "удали письмо", "прочитай письмо",
+            "найди в почте", "получи письмо", "отчёт из письма"
+        ])
+        
+        is_search_task = any(keyword in task_lower for keyword in [
+            "найди", "поищи", "расскажи про", "информация", "погода", "новости",
+            "узнай", "что такое", "как", "где найти"
+        ]) or not is_email_task  # По умолчанию считаем поисковой задачей
+        
+        base_prompt = """Ты — автономный браузерный агент с двумя режимами работы:
+1. 🔍 ПОИСК ИНФОРМАЦИИ в интернете через Яндекс
+2. 📧 РАБОТА С ЭЛЕКТРОННОЙ ПОЧТОЙ через браузер (Yandex Mail)
 
 ## 🔴 КРИТИЧЕСКИ ВАЖНО — ФОРМАТ ОТВЕТА:
 1. ТВОЙ ОТВЕТ ДОЛЖЕН СОДЕРЖАТЬ ТОЛЬКО ОДИН ЧИСТЫЙ JSON БЕЗ ЛЮБОГО ДРУГОГО ТЕКСТА
@@ -89,15 +101,43 @@ class BrowserAgent:
 
 ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
 {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
+"""
+        
+        # Добавляем инструкции для почтовых задач
+        if is_email_task:
+            email_section = """
+## 📧 ТЫ РАБОТАЕШЬ С ЭЛЕКТРОННОЙ ПОЧТОЙ (YANDEX MAIL через браузер)
 
-## СТРАТЕГИЯ РАБОТЫ:
+### СТРАТЕГИЯ ДЛЯ ПОЧТОВЫХ ЗАДАЧ:
+1. ШАГ 1: Перейди на почту → {"tool": "navigate", "args": {"url": "https://mail.yandex.ru"}}
+2. ШАГ 2: Сделай снимок страницы → {"tool": "extract_page_snapshot", "args": {}}
+3. ШАГ 3: Найди и кликни по письмам в списке
+4. ШАГ 4: Прочитай содержимое писем
+
+### ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+Все браузерные инструменты работают с почтой через веб-интерфейс.
+"""
+            base_prompt += email_section
+        
+        # Добавляем инструкции для поисковых задач
+        if is_search_task:
+            search_section = """
+## 🔍 ТЫ ВЫПОЛНЯЕШЬ ПОИСК ИНФОРМАЦИИ В ИНТЕРНЕТЕ
+
+### ГЛАВНОЕ ПРАВИЛО ДЛЯ ИНФОРМАЦИОННЫХ ЗАПРОСОВ:
+Если пользователь просит найти информацию («найди», «поищи», «расскажи про»):
+→ ВСЕГДА начинай с перехода на Яндекс: https://yandex.ru
+→ Всегда используй поле поиска Яндекса для ввода запроса
+→ Никогда не пытайся угадать URL напрямую!
+
+### СТРАТЕГИЯ РАБОТЫ:
 1. ШАГ 1: {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
 2. ШАГ 2: {"tool": "extract_page_snapshot", "args": {}}
 3. ШАГ 3: Найди поле поиска (обычно индекс 0 или 1) → {"tool": "fill_field_by_index", "args": {"index": 0, "value": "запрос"}}
 4. ШАГ 4: {"tool": "press_enter", "args": {}}
 5. ШАГ 5: Проанализируй результаты поиска → кликни по подходящей ссылке
 
-## ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+### ДОСТУПНЫЕ ИНСТРУМЕНТЫ ДЛЯ БРАУЗЕРА:
 {"tool": "navigate", "args": {"url": "https://example.com"}}
 {"tool": "extract_page_snapshot", "args": {}}
 {"tool": "click_element_by_index", "args": {"index": 0}}
@@ -107,7 +147,10 @@ class BrowserAgent:
 {"tool": "check_checkbox", "args": {"index": 0}}
 {"tool": "get_current_url", "args": {}}
 {"tool": "wait_for_navigation", "args": {}}
-
+"""
+            base_prompt += search_section
+        
+        finish_section = """
 ## ФИНАЛЬНЫЙ ОТВЕТ:
 Когда задача выполнена, напиши ТОЛЬКО:
 ЗАДАЧА ВЫПОЛНЕНА
@@ -115,6 +158,9 @@ class BrowserAgent:
 
 НЕ пиши ничего после этого. НЕ продолжай размышления.
 """
+        base_prompt += finish_section
+        
+        return base_prompt
 
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Выполнение инструмента по имени"""
@@ -200,7 +246,7 @@ class BrowserAgent:
         
         # Инициализация истории диалога для GigaChat
         from gigachat.models import Messages, MessagesRole
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(task)
         self.conversation_history = [
             Messages(role=MessagesRole.SYSTEM, content=system_prompt),
             Messages(role=MessagesRole.USER, content=f"ЗАДАЧА: {task}")
