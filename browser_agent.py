@@ -127,8 +127,11 @@ class BrowserAgent:
 ### ГЛАВНОЕ ПРАВИЛО ДЛЯ ИНФОРМАЦИОННЫХ ЗАПРОСОВ:
 Если пользователь просит найти информацию («найди», «поищи», «расскажи про»):
 → ВСЕГДА начинай с перехода на Яндекс: https://yandex.ru
-→ Всегда используй поле поиска Яндекса для ввода запроса
-→ Никогда не пытайся угадать URL напрямую!
+→ Используй поле поиска Яндекса для ввода запроса
+→ Если Яндекс недоступен (капча/редирект), попробуй альтернативы:
+   • https://ya.ru - короткая версия Яндекса
+   • https://google.com - международный поиск
+   • https://ru.wikipedia.org - для энциклопедической информации
 
 ### СТРАТЕГИЯ РАБОТЫ:
 1. ШАГ 1: {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
@@ -136,6 +139,11 @@ class BrowserAgent:
 3. ШАГ 3: Найди поле поиска (обычно индекс 0 или 1) → {"tool": "fill_field_by_index", "args": {"index": 0, "value": "запрос"}}
 4. ШАГ 4: {"tool": "press_enter", "args": {}}
 5. ШАГ 5: Проанализируй результаты поиска → кликни по подходящей ссылке
+
+### ЕСЛИ ЯНДЕКС НЕДОСТУПЕН (КАПЧА/РЕДИРЕКТ):
+1. Попробуй https://ya.ru - более лёгкая версия
+2. Попробуй https://ru.wikipedia.org/wiki/Запрос
+3. Попробуй https://google.com/search?q=запрос
 
 ### ДОСТУПНЫЕ ИНСТРУМЕНТЫ ДЛЯ БРАУЗЕРА:
 {"tool": "navigate", "args": {"url": "https://example.com"}}
@@ -339,6 +347,15 @@ class BrowserAgent:
                     
                     result_msg += f"\n\nТекущая страница: {tool_result.get('title', 'Без названия')}"
                     result_msg += f"\nURL: {tool_result.get('url', 'Неизвестен')}"
+                    
+                    # Проверка на капчу/редирект
+                    is_captcha = tool_result.get("is_captcha_detected", False)
+                    if is_captcha:
+                        result_msg += "\n⚠️ ОБНАРУЖЕНА КАПЧА ИЛИ РЕДИРЕКТ! Попробуй другой URL:"
+                        result_msg += "\n- https://ya.ru - короткая версия Яндекса"
+                        result_msg += "\n- https://google.com/search?q=запрос"
+                        result_msg += "\n- https://ru.wikipedia.org/wiki/Запрос"
+                    
                     result_msg += f"\n\nЭлементы на странице ({tool_result.get('element_count', 0)}):"
                     result_msg += f"\n{elements_info or 'Нет элементов'}"
                     if tool_result.get("element_count", 0) > 15:
@@ -351,11 +368,16 @@ class BrowserAgent:
                     else:
                         blank_page_count = 0
                         last_url = current_url
+                    
+                    # Если обнаружена капча, увеличиваем счётчик для восстановления
+                    if is_captcha:
+                        blank_page_count += 1
                 
                 # Детектирование неудачной навигации
                 if tool_name == "navigate":
                     current_url = tool_result.get("url", "")
-                    if current_url == "about:blank" or not tool_result.get("success"):
+                    is_captcha = tool_result.get("is_captcha_detected", False)
+                    if current_url == "about:blank" or not tool_result.get("success") or is_captcha:
                         blank_page_count += 1
                     else:
                         blank_page_count = 0
