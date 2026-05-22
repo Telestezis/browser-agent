@@ -59,14 +59,15 @@ class BrowserTools:
             # Проверка на капчу/редирект
             current_url = self.page.url
             is_captcha_detected = False
-            captcha_keywords = ['captcha', 'security check', 'проверка безопасности', 'dzen.ru', 'yredirect']
+            captcha_keywords = ['captcha', 'security check', 'проверка безопасности', 'yredirect']
             for keyword in captcha_keywords:
                 if keyword.lower() in current_url.lower():
                     is_captcha_detected = True
                     break
             
             result = self.page.evaluate("""() => {
-                const elements = [];
+                // Извлекаем ИНТЕРактивные элементы
+                const interactiveElements = [];
                 const selectors = 'a, button, input, textarea, select, [role="button"], [role="link"]';
                 const allElements = Array.from(document.querySelectorAll(selectors));
                 
@@ -87,8 +88,8 @@ class BrowserTools:
                             const type = el.tagName.toLowerCase();
                             const inputType = el.type || '';
                             
-                            elements.push({
-                                index: elements.length,
+                            interactiveElements.push({
+                                index: interactiveElements.length,
                                 type: type,
                                 inputType: inputType,
                                 text: text.substring(0, 100),
@@ -103,15 +104,55 @@ class BrowserTools:
                     }
                 });
                 
+                // ИЗВЛЕКАЕМ КОНТЕНТ СТРАНИЦЫ - заголовки, параграфы, списки
+                const contentElements = [];
+                const contentSelectors = 'h1, h2, h3, h4, h5, h6, p, li, span:not([aria-hidden="true"]), div[role="article"], article, section';
+                const contentAll = Array.from(document.querySelectorAll(contentSelectors));
+                
+                contentAll.forEach((el, idx) => {
+                    try {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        const text = el.textContent.trim();
+                        
+                        // Извлекаем только видимые элементы с содержательным текстом
+                        if (
+                            text.length > 5 && text.length < 500 &&
+                            style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            rect.top >= -100 && rect.bottom <= window.innerHeight + 100
+                        ) {
+                            contentElements.push({
+                                tag: el.tagName.toLowerCase(),
+                                text: text.substring(0, 200),
+                                class: el.className || ''
+                            });
+                        }
+                    } catch (e) {
+                        // Пропускаем
+                    }
+                });
+                
+                // Извлекаем основной текст статьи/контента
+                let mainText = '';
+                const mainContent = document.querySelector('main, article, [role="main"], .content, .article-body') || 
+                                   document.querySelector('body');
+                if (mainContent) {
+                    mainText = mainContent.textContent.trim().replace(/\\s+/g, ' ').substring(0, 3000);
+                }
+                
                 return {
                     title: document.title,
                     url: window.location.href,
-                    elements: elements.slice(0, 50)
+                    elements: interactiveElements.slice(0, 50),
+                    content: contentElements.slice(0, 30),
+                    mainText: mainText
                 };
             }""")
             
             element_count = len(result.get("elements", []))
-            logger.info(f"✅ Извлечено {element_count} элементов")
+            content_count = len(result.get("content", []))
+            logger.info(f"✅ Извлечено {element_count} интерактивных элементов, {content_count} элементов контента")
             
             # Проверка на капчу по содержимому страницы
             page_title = result.get("title", "").lower()
@@ -123,9 +164,12 @@ class BrowserTools:
                 "title": result.get("title", ""),
                 "url": result.get("url", ""),
                 "elements": result.get("elements", []),
+                "content": result.get("content", []),
+                "mainText": result.get("mainText", ""),
                 "element_count": element_count,
+                "content_count": content_count,
                 "is_captcha_detected": is_captcha_detected,
-                "message": f"Извлечено {element_count} элементов со страницы" + (" ⚠️ ОБНАРУЖЕНА КАПЧА/РЕДИРЕКТ!" if is_captcha_detected else "")
+                "message": f"Извлечено {element_count} элементов, {content_count} элементов контента" + (" ⚠️ ОБНАРУЖЕНА КАПЧА/РЕДИРЕКТ!" if is_captcha_detected else "")
             }
             
         except Exception as e:

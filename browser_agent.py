@@ -101,6 +101,18 @@ class BrowserAgent:
 
 ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
 {"tool": "navigate", "args": {"url": "https://yandex.ru"}}
+
+## 📄 КАК АНАЛИЗИРОВАТЬ СТРАНИЦУ:
+Когда получаешь снимок страницы (extract_page_snapshot), ты видишь:
+1. 🔗 Элементы - интерактивные элементы (ссылки, кнопки, поля ввода) с индексами
+2. 📄 КОНТЕНТ СТРАНИЦЫ - заголовки <h1>, <h2>, параграфы <p>, списки <li>
+3. 📝 ОСНОВНОЙ ТЕКСТ - основной текстовый контент статьи/страницы
+
+ВАЖНО:
+• Для поиска информации читай ОСНОВНОЙ ТЕКСТ и КОНТЕНТ СТРАНИЦЫ
+• Для навигации используй ЭЛЕМЕНТЫ с их индексами
+• Если нужно найти конкретную информацию - ищи её в основном тексте
+• Не игнорируй контент страницы - там содержится основная информация!
 """
         
         # Добавляем инструкции для почтовых задач
@@ -345,8 +357,24 @@ class BrowserAgent:
                         for el in elements if isinstance(el, dict)
                     ])
                     
+                    # ДОБАВЛЯЕМ КОНТЕНТ СТРАНИЦЫ - заголовки и основной текст
+                    content = tool_result.get("content", [])[:10]
+                    content_info = ""
+                    if content:
+                        content_info = "\n\n📄 КОНТЕНТ СТРАНИЦЫ:"
+                        for el in content:
+                            tag = el.get('tag', '')
+                            text = el.get('text', '')[:80].strip()
+                            if text:
+                                content_info += f"\n  <{tag}> {text}"
+                    
+                    main_text = tool_result.get("mainText", "")
+                    if main_text:
+                        content_info += f"\n\n📝 ОСНОВНОЙ ТЕКСТ (первые 500 символов):\n{main_text[:500]}"
+                    
                     result_msg += f"\n\nТекущая страница: {tool_result.get('title', 'Без названия')}"
                     result_msg += f"\nURL: {tool_result.get('url', 'Неизвестен')}"
+                    result_msg += content_info
                     
                     # Проверка на капчу/редирект
                     is_captcha = tool_result.get("is_captcha_detected", False)
@@ -356,14 +384,19 @@ class BrowserAgent:
                         result_msg += "\n- https://google.com/search?q=запрос"
                         result_msg += "\n- https://ru.wikipedia.org/wiki/Запрос"
                     
-                    result_msg += f"\n\nЭлементы на странице ({tool_result.get('element_count', 0)}):"
+                    result_msg += f"\n\n🔗 Элементы на странице ({tool_result.get('element_count', 0)}):"
                     result_msg += f"\n{elements_info or 'Нет элементов'}"
                     if tool_result.get("element_count", 0) > 15:
                         result_msg += f"\n... и ещё {tool_result.get('element_count', 0) - 15} элементов"
                     
                     # Детектирование пустой страницы
                     current_url = tool_result.get("url", "")
-                    if current_url == "about:blank" or tool_result.get("element_count", 0) == 0:
+                    element_count = tool_result.get("element_count", 0)
+                    content_count = tool_result.get("content_count", 0)
+                    main_text_len = len(tool_result.get("mainText", ""))
+                    
+                    # Считаем страницу пустой только если нет НИ элементов, НИ контента, НИ текста
+                    if current_url == "about:blank" or (element_count == 0 and content_count == 0 and main_text_len < 50):
                         blank_page_count += 1
                     else:
                         blank_page_count = 0
