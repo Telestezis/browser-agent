@@ -48,18 +48,22 @@ def extract_json_from_text(text: str) -> Optional[Dict[str, Any]]:
                         return None
                 
                 # Проверяем наличие обязательного ключа
-                if isinstance(parsed, dict) and "tool" in parsed:
-                    # Рекурсивная очистка всех строковых значений
+                if isinstance(parsed, dict):
+                    # Рекурсивная очистка всех строковых значений (ключей и значений)
                     def clean_strings(obj):
                         if isinstance(obj, dict):
-                            return {k: clean_strings(v) for k, v in obj.items()}
+                            return {k.strip(): clean_strings(v) for k, v in obj.items()}
                         elif isinstance(obj, list):
                             return [clean_strings(v) for v in obj]
                         elif isinstance(obj, str):
                             return obj.strip()
                         return obj
                     
-                    return clean_strings(parsed)
+                    cleaned = clean_strings(parsed)
+                    
+                    # Проверяем наличие ключа "tool" после очистки
+                    if "tool" in cleaned:
+                        return cleaned
                 break
     
     return None
@@ -138,10 +142,12 @@ def confirm_action(action: str, details: str) -> bool:
         if confirm in ["да", "нет", "y", "n"]:
             return confirm in ["да", "y"]
         print("Пожалуйста, введите 'да' или 'нет'")
-    # utils.py
+# utils.py
+from typing import List, Dict
 def prioritize_elements(elements: List[Dict], task: str) -> List[Dict]:
     """Приоритизирует элементы на основе задачи (оставляет только релевантные)"""
     # Пример: для задачи "удалить спам" оставляем только чекбоксы и кнопки удаления
     if "спам" in task.lower() or "удалить" in task.lower():
         return [e for e in elements if "checkbox" in str(e) or "delete" in str(e).lower()]
+    from config import Config
     return elements[:Config.PAGE_ELEMENTS_LIMIT]  # fallback
